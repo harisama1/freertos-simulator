@@ -1,0 +1,38 @@
+/* Example 4.8 Changing task priorities.
+ * Task 1 (prio 2) raises Task 2 above itself; Task 2 lowers itself again. */
+
+TaskHandle_t xTask2Handle = NULL;
+
+void vTask1( void * pvParameters )
+{
+    UBaseType_t uxPriority = uxTaskPriorityGet( NULL );
+
+    for( ;; )
+    {
+        vPrintLine( "Task 1 is running" );
+        vPrintLine( "About to raise the Task 2 priority" );
+        vTaskPrioritySet( xTask2Handle, ( uxPriority + 1 ) );
+    }
+}
+
+void vTask2( void * pvParameters )
+{
+    UBaseType_t uxPriority = uxTaskPriorityGet( NULL );
+
+    for( ;; )
+    {
+        vPrintLine( "Task 2 is running" );
+        vPrintLine( "About to lower the Task 2 priority" );
+        vTaskPrioritySet( NULL, ( uxPriority - 2 ) );
+    }
+}
+
+int main( void )
+{
+    xTaskCreate( vTask1, "Task 1", 1000, NULL, 2, NULL );
+    xTaskCreate( vTask2, "Task 2", 1000, NULL, 1, &xTask2Handle );
+
+    vTaskStartScheduler();
+
+    for( ;; );
+}

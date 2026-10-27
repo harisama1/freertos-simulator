@@ -1,0 +1,57 @@
+/* Chapter 3: heap memory management.
+ * Each xTaskCreate() takes a TCB + a stack from the FreeRTOS heap.
+ * Try heap_1 (no free), heap_2/heap_4 (free), and a small heap size
+ * (e.g. 20000 bytes) to see vApplicationMallocFailedHook(). */
+
+static void vWorker( void * pvParameters )
+{
+    for( ;; )
+    {
+        vTaskDelay( pdMS_TO_TICKS( 50 ) );
+    }
+}
+
+void vApplicationMallocFailedHook( void )
+{
+    printf( "MallocFailedHook: heap exhausted, free = %u\n",
+            ( unsigned ) xPortGetFreeHeapSize() );
+}
+
+static void vManager( void * pvParameters )
+{
+    TaskHandle_t ax[ 4 ];
+    int i;
+
+    for( ;; )
+    {
+        printf( "free before = %u bytes\n", ( unsigned ) xPortGetFreeHeapSize() );
+
+        for( i = 0; i < 4; i++ )
+        {
+            if( xTaskCreate( vWorker, "Worker", 500, NULL, 1, &ax[ i ] ) != pdPASS )
+            {
+                printf( "xTaskCreate %d failed\n", i );
+                ax[ i ] = NULL;
+            }
+        }
+        printf( "after 4 x xTaskCreate = %u bytes\n", ( unsigned ) xPortGetFreeHeapSize() );
+
+        for( i = 0; i < 4; i++ )
+        {
+            if( ax[ i ] != NULL )
+                vTaskDelete( ax[ i ] );
+        }
+        vTaskDelay( pdMS_TO_TICKS( 10 ) );   /* let Idle free the memory */
+        printf( "after vTaskDelete     = %u bytes\n\n",
+                ( unsigned ) xPortGetFreeHeapSize() );
+
+        vTaskDelay( pdMS_TO_TICKS( 200 ) );
+    }
+}
+
+int main( void )
+{
+    xTaskCreate( vManager, "Manager", 1000, NULL, 2, NULL );
+    vTaskStartScheduler();
+    for( ;; );
+}

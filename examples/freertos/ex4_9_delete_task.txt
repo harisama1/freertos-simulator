@@ -1,0 +1,32 @@
+/* Example 4.9 Deleting tasks.
+ * Task 1 creates Task 2 (higher priority); Task 2 deletes itself.
+ * Watch the heap: allocated for Task 2, freed later by the Idle task. */
+
+TaskHandle_t xTask2Handle = NULL;
+
+void vTask2( void * pvParameters )
+{
+    vPrintLine( "Task 2 is running and about to delete itself" );
+    vTaskDelete( xTask2Handle );
+}
+
+void vTask1( void * pvParameters )
+{
+    const TickType_t xDelay100ms = pdMS_TO_TICKS( 100UL );
+
+    for( ;; )
+    {
+        vPrintLine( "Task 1 is running" );
+        xTaskCreate( vTask2, "Task 2", 1000, NULL, 2, &xTask2Handle );
+        vTaskDelay( xDelay100ms );
+    }
+}
+
+int main( void )
+{
+    xTaskCreate( vTask1, "Task 1", 1000, NULL, 1, NULL );
+
+    vTaskStartScheduler();
+
+    for( ;; );
+}

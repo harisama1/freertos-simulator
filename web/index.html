@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FreeRTOS Simulator</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --line: #d9dde3; --text: #1d2330; --muted: #667085;
+  --accent: #2f6fde; --accent-text: #ffffff; --err: #c62828; --warn: #a15c00; --ok: #1b7f3b;
+  --code-bg: #fbfbfc; --gutter: #eef0f3; --tick: #c3c9d2; --ready: #8a94a6; --best: #e6f4ea;
+  --isr: #d0342c; --wait: #c77700; --gpio: #0f8a5f;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171c; --panel: #1b1f26; --line: #2c323c; --text: #e3e7ee; --muted: #9aa4b2;
+    --accent: #5b8ff0; --accent-text: #0d1117; --err: #ff6b6b; --warn: #f0b35b; --ok: #5bd08a;
+    --code-bg: #161a20; --gutter: #1f242c; --tick: #39414d; --ready: #7d8798; --best: #1d3326;
+    --isr: #ff6b6b; --wait: #f0b35b; --gpio: #4fd1a0;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+       display: flex; flex-direction: column; }
+header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 8px 12px;
+         background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 15px; margin: 0 4px 0 0; font-weight: 650; }
+button, select, input { font: inherit; color: inherit; }
+button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .55; cursor: wait; }
+select, input[type=number] { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 6px; }
+input[type=number] { width: 84px; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; }
+.opts label { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
+.badge-mode { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--gutter); color: var(--muted); white-space: nowrap; }
+.badge-file { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); white-space: nowrap; }
+.status { margin-left: auto; font-size: 13px; color: var(--muted); }
+main { flex: 1; display: grid; grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.25fr); min-height: 0; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 55vh auto; } }
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-right: 1px solid var(--line); }
+.pane-head { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: var(--panel);
+             border-bottom: 1px solid var(--line); font-size: 13px; min-height: 37px; }
+.fname { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor { flex: 1; display: flex; min-height: 0; background: var(--code-bg); }
+.codewrap { flex: 1; position: relative; min-width: 0; display: flex; }
+#hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+#hl > div { position: absolute; left: 0; right: 0; height: 19.5px; }
+#hl .cur { background: color-mix(in srgb, var(--hlc, var(--accent)) 26%, transparent); box-shadow: inset 3px 0 0 var(--hlc, var(--accent)); }
+#hl .blk { background: color-mix(in srgb, var(--hlc, var(--accent)) 10%, transparent); }
+#hl .bp { background: color-mix(in srgb, var(--err) 9%, transparent); }
+.gutter .gl { height: 19.5px; cursor: pointer; position: relative; padding-left: 14px; }
+.gutter .gl:hover { color: var(--text); }
+.gutter .gl.bp::before { content: ""; position: absolute; left: 1px; top: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--err); }
+.gutter .gl .td { position: absolute; left: 3px; top: 7px; width: 6px; height: 6px; border-radius: 1px; }
+.dbg-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.dbg-bar button { padding: 3px 9px; }
+.dbg-bar .pos { margin-left: auto; font: 12px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
+#dbgSlider { width: 100%; margin: 2px 0 10px; }
+.opcard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); margin-bottom: 10px; }
+.opcard .who { display: inline-block; font-size: 12px; font-weight: 650; padding: 1px 8px; border-radius: 10px; color: #fff; margin-right: 8px; }
+.opcard .what { font-size: 15px; font-weight: 600; margin: 6px 0 4px; word-break: break-word; }
+.opcard .why { font-size: 12.5px; color: var(--muted); }
+.opcard .kind { font: 11px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.dgrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+@media (max-width: 1200px) { .dgrid { grid-template-columns: minmax(0, 1fr); } }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 9px; border: 1px solid currentColor; }
+.st-Running { color: var(--ok); } .st-Ready { color: var(--accent); } .st-Blocked { color: var(--wait); } .st-Suspended, .st-Đã { color: var(--muted); }
+.log { font-size: 12.5px; max-height: 230px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+.log div { padding: 2px 8px; cursor: pointer; display: flex; gap: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log div:hover { background: var(--gutter); }
+.log div.now { background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 600; }
+.log .lt { font: 11px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); min-width: 64px; text-align: right; }
+.log .lw { min-width: 74px; overflow: hidden; text-overflow: ellipsis; }
+.lvl { position: relative; height: 8px; background: var(--gutter); border-radius: 3px; min-width: 60px; }
+.lvl > div { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; }
+.gutter { padding: 8px 6px 8px 8px; text-align: right; color: var(--muted); background: var(--gutter);
+          font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; user-select: none; overflow: hidden; min-width: 44px; white-space: pre; }
+textarea { flex: 1; border: 0; outline: 0; resize: none; padding: 8px 10px; background: transparent; color: var(--text);
+           font: 13px/1.5 ui-monospace, Menlo, Consolas, monospace; tab-size: 4; white-space: pre; overflow: auto; }
+.drop { position: fixed; inset: 0; background: color-mix(in srgb, var(--accent) 18%, transparent); border: 3px dashed var(--accent);
+        display: none; align-items: center; justify-content: center; font-size: 22px; font-weight: 600; z-index: 10; pointer-events: none; }
+body.dragging .drop { display: flex; }
+.tabs { display: flex; gap: 2px; }
+.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 4px 10px; color: var(--muted); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab .badge[hidden] { display: none; }
+.tab .badge { display: inline-block; min-width: 16px; padding: 0 4px; margin-left: 4px; border-radius: 8px; background: var(--err); color: #fff; font-size: 11px; }
+.views { flex: 1; min-height: 0; position: relative; }
+.view { position: absolute; inset: 0; overflow: auto; padding: 10px 12px; display: none; }
+.view.active { display: block; }
+pre.out { margin: 0; font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.stderr { color: var(--err); }
+.exitline { margin: 10px 0 4px; font-size: 13px; color: var(--muted); }
+.hint { border-left: 3px solid var(--warn); padding: 6px 10px; margin: 0 0 8px; background: color-mix(in srgb, var(--warn) 10%, transparent); border-radius: 4px; }
+.good { border-left-color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.bad { border-left-color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); }
+.err-line { cursor: pointer; color: var(--err); }
+.err-line:hover { text-decoration: underline; }
+.warn-line { cursor: pointer; color: var(--warn); }
+.empty { color: var(--muted); padding: 30px 6px; text-align: center; }
+.tl-ctl { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+.legend { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 12px; }
+.legend i { display: inline-block; width: 18px; height: 8px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+svg text { fill: var(--text); font: 12px system-ui, sans-serif; }
+svg .axis { fill: var(--muted); font-size: 11px; }
+svg .sub { fill: var(--muted); font-size: 10px; }
+svg .barlbl { fill: #fff; font-size: 10px; font-weight: 600; pointer-events: none; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin-bottom: 14px; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+h3 { font-size: 13px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.cfg { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-bottom: 10px; }
+.cfg code { font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--gutter); border-radius: 4px; padding: 2px 6px; }
+.note { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+.bar { height: 8px; background: var(--accent); border-radius: 2px; }
+.meter { position: relative; height: 10px; background: var(--gutter); border-radius: 3px; overflow: hidden; min-width: 80px; }
+.meter > div { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; }
+.st-ok { color: var(--ok); } .st-tight { color: var(--warn); font-weight: 600; } .st-overflow { color: var(--err); font-weight: 700; }
+#tip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+       padding: 4px 8px; font-size: 12px; display: none; z-index: 20; box-shadow: 0 2px 8px rgba(0,0,0,.15); white-space: pre; }
+</style>
+</head>
+<body>
+<div class="drop">Thả file vào đây để chạy mô phỏng</div>
+<div id="tip"></div>
+<header>
+  <h1>FreeRTOS Simulator</h1>
+  <button id="btnOpen" title="Mở file .c / .txt">Mở file…</button>
+  <input type="file" id="file" accept=".c,.txt,.h,text/plain" hidden>
+  <select id="examples" title="Ví dụ"><option value="">Ví dụ…</option></select>
+  <button id="btnRun" class="primary" title="Ctrl+Enter">▶ Chạy</button>
+  <button id="btnDebug" title="Chạy và ghi lại từng dòng lệnh, từng thao tác kernel để tua từng bước (Ctrl+Shift+Enter)">🐞 Debug</button>
+  <label class="opts" title="Chế độ mô phỏng">Chế độ
+    <select id="mode">
+      <option value="auto">Tự nhận</option>
+      <option value="freertos">FreeRTOS (kernel thật)</option>
+      <option value="c">Chương trình C</option>
+    </select>
+  </label>
+  <span class="badge-mode" id="modeBadge"></span>
+  <div class="opts">
+    <span class="opts fr-only">
+      <label title="Chip mục tiêu: giới hạn RAM, heap mặc định, khung context trên stack">MCU <select id="mcu"></select></label>
+      <label title="configUSE_PREEMPTION"><input type="checkbox" id="preemption"> Preemption</label>
+      <label title="configUSE_TIME_SLICING"><input type="checkbox" id="time_slicing"> Time slicing</label>
+      <label title="configIDLE_SHOULD_YIELD"><input type="checkbox" id="idle_should_yield"> Idle yield</label>
+      <label title="configTICK_RATE_HZ">Tick <select id="tick_rate"><option>100</option><option>250</option><option>500</option><option>1000</option></select> Hz</label>
+      <label title="portable/MemMang/heap_N.c">Heap <select id="heap"><option value="1">heap_1</option><option value="2">heap_2</option><option value="3">heap_3</option><option value="4">heap_4</option><option value="5">heap_5</option></select></label>
+      <label title="configTOTAL_HEAP_SIZE (byte)">Size <input type="number" id="heap_size" min="512" step="512"></label>
+      <label title="configSUPPORT_STATIC_ALLOCATION"><input type="checkbox" id="static_alloc"> Static alloc</label>
+      <label title="Thêm thời điểm (ms) vào đầu mỗi dòng output"><input type="checkbox" id="timestamp"> Thời điểm</label>
+    </span>
+    <label title="Giới hạn thời gian chạy (giây)">Chạy <input type="number" id="duration" min="0.05" max="60" step="1" style="width:64px"> s</label>
+  </div>
+  <span class="badge-file" id="fileBadge" hidden title="Tuỳ chọn ghi trong file bằng dòng // frsim: ... (ưu tiên hơn ô điều khiển)"></span>
+  <span class="status" id="status">Sẵn sàng</span>
+</header>
+<main>
+  <section class="pane">
+    <div class="pane-head"><span>Code</span><span class="fname" id="fname">main.c</span></div>
+    <div class="editor">
+      <div class="gutter" id="gutter" title="Bấm số dòng để đặt/bỏ breakpoint"></div>
+      <div class="codewrap"><div id="hl"></div><textarea id="code" spellcheck="false" autocomplete="off" autocapitalize="off"></textarea></div>
+    </div>
+  </section>
+  <section class="pane">
+    <div class="pane-head">
+      <div class="tabs">
+        <button class="tab active" data-v="out">Kết quả</button>
+        <button class="tab" data-v="log">Build<span class="badge" id="errBadge" hidden></span></button>
+        <button class="tab" data-v="tl">Timeline</button>
+        <button class="tab" data-v="stat">Thống kê</button>
+        <button class="tab" data-v="dbg">Debug</button>
+      </div>
+    </div>
+    <div class="views">
+      <div class="view active" id="v-out"><div class="empty">Viết code, mở file, hoặc kéo-thả file vào cửa sổ rồi bấm ▶ Chạy (Ctrl+Enter).<br><br>
+        FreeRTOS: file C dùng API FreeRTOS, ngắt và ngoại vi giả lập qua <code>sim_irq_*</code>, <code>sim_gpio_*</code>, <code>sim_uart_*</code>, <code>sim_adc_*</code>.<br>
+        C: chương trình bare-metal/superloop, timeline qua <code>st_run()</code>, <code>st_block()</code>…</div></div>
+      <div class="view" id="v-log"><div class="empty">Chưa build.</div></div>
+      <div class="view" id="v-tl"><div class="empty">Chưa có dữ liệu.</div></div>
+      <div class="view" id="v-stat"><div class="empty">Chưa có dữ liệu.</div></div>
+      <div class="view" id="v-dbg"><div class="empty">Bấm 🐞 Debug để chạy và ghi lại từng bước: dòng lệnh nào đang chạy, task nào giữ CPU, kernel làm gì với queue/semaphore, ISR nào xảy ra, output nào được in.<br><br>Bấm số dòng bên trái để đặt breakpoint, rồi dùng "Tới breakpoint".</div></div>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const code = $('code'), gutter = $('gutter');
+const OPT_BOOL = ['preemption', 'time_slicing', 'idle_should_yield', 'static_alloc', 'timestamp'];
+const OPT_VAL = ['mcu', 'tick_rate', 'heap', 'heap_size', 'duration'];
+const COLORS = ['#2e9e6b', '#2f6fde', '#e0453a', '#9b51e0', '#d98a00', '#0f9fb3', '#c2417f', '#6d7c1a', '#7a5af8', '#b54708'];
+const MODE_NAME = { freertos: 'FreeRTOS · kernel thật', c: 'Chương trình C' };
+const TYPE_NAME = { queue: 'queue', mutex: 'mutex', recursive: 'recursive mutex', binary: 'binary sem', counting: 'counting sem', timer: 'timer', eventgroup: 'event group' };
+let DEFAULTS = {};
+let fileName = 'main.c', last = null, tlStart = 0, tlLen = 0, MCUS = {};
+
+const store = {
+  get(k) { try { return localStorage.getItem('frsim.' + k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem('frsim.' + k, v); } catch (e) {} },
+};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---------- mode ---------- */
+function detectMode(src) { return /\b(vTaskStartScheduler|xTaskCreate(Static)?)\b/.test(src) ? 'freertos' : 'c'; }
+function effMode() { return $('mode').value === 'auto' ? detectMode(code.value) : $('mode').value; }
+function updateMode() {
+  const m = effMode();
+  $('modeBadge').textContent = ($('mode').value === 'auto' ? 'tự nhận: ' : '') + MODE_NAME[m];
+  document.querySelectorAll('.fr-only').forEach(e => e.style.display = m === 'freertos' ? '' : 'none');
+  const d = fileDirectives(code.value);
+  const keys = Object.keys(d);
+  $('fileBadge').hidden = !keys.length || m !== 'freertos';
+  $('fileBadge').textContent = '⚙ theo file: ' + keys.map(k => k + '=' + d[k]).join(' ');
+}
+function fileDirectives(src) {
+  const d = {};
+  for (const m of src.matchAll(/frsim:\s*([^\n*]*)/g))
+    for (const kv of m[1].matchAll(/([a-z_]+)\s*=\s*([\w.]+)/g)) d[kv[1]] = kv[2];
+  return d;
+}
+$('mode').onchange = () => { store.set('mode', $('mode').value); updateMode(); };
+
+/* ---------- editor ---------- */
+let modeTimer = 0;
+const BPS = new Set();
+function updateGutter() {
+  const n = code.value.split('\n').length;
+  let s = '';
+  for (let i = 1; i <= n; i++) s += '<div class="gl' + (BPS.has(i) ? ' bp' : '') + '" data-l="' + i + '">' + i + '</div>';
+  gutter.innerHTML = s;
+  gutter.scrollTop = code.scrollTop;
+  if (typeof dbgPaint === 'function') dbgPaint();
+}
+gutter.addEventListener('click', e => {
+  const g = e.target.closest('.gl');
+  if (!g) return;
+  const l = +g.dataset.l;
+  if (BPS.has(l)) BPS.delete(l); else BPS.add(l);
+  g.classList.toggle('bp', BPS.has(l));
+  if (typeof dbgPaint === 'function') dbgPaint();
+});
+code.addEventListener('input', () => {
+  updateGutter(); store.set('code', code.value);
+  clearTimeout(modeTimer); modeTimer = setTimeout(updateMode, 300);
+});
+code.addEventListener('scroll', () => { gutter.scrollTop = code.scrollTop; $('hl').style.transform = 'translateY(' + (-code.scrollTop) + 'px)'; });
+code.addEventListener('keydown', e => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    code.setRangeText('    ', code.selectionStart, code.selectionEnd, 'end');
+    code.dispatchEvent(new Event('input'));
+  }
+});
+function gotoLine(n) {
+  const lines = code.value.split('\n');
+  let pos = 0;
+  for (let i = 0; i < n - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+  code.focus();
+  code.setSelectionRange(pos, pos + (lines[n - 1] || '').length);
+  const lh = parseFloat(getComputedStyle(code).lineHeight) || 19.5;
+  code.scrollTop = Math.max(0, (n - 5) * lh);
+}
+function setFile(name, text) {
+  /* options taken from the previous file's '// frsim:' line must not leak into this one */
+  try { const o = store.get('opts.v2'); setOpts(o ? JSON.parse(o) : DEFAULTS); } catch (e) { setOpts(DEFAULTS); }
+  fileName = (name || 'main.c').split('/').pop();
+  $('fname').textContent = fileName;
+  code.value = text;
+  updateGutter();
+  updateMode();
+  store.set('code', text);
+  store.set('fname', fileName);
+}
+
+/* ---------- options ---------- */
+function getOpts() {
+  const o = { mode: $('mode').value };
+  OPT_BOOL.forEach(k => o[k] = $(k).checked ? 1 : 0);
+  OPT_VAL.forEach(k => o[k] = k === 'mcu' ? $(k).value : Number($(k).value));
+  return o;
+}
+function setOpts(o) {
+  OPT_BOOL.forEach(k => { if (k in o) $(k).checked = !!Number(o[k]); });
+  OPT_VAL.forEach(k => { if (k in o) $(k).value = o[k]; });
+}
+[...OPT_BOOL, ...OPT_VAL].forEach(k => $(k).addEventListener('change', () => store.set('opts.v2', JSON.stringify(getOpts()))));
+$('mcu').addEventListener('change', () => {
+  const m = MCUS[$('mcu').value];
+  if (m) store.set('opts.v2', JSON.stringify(getOpts()));
+});
+
+/* ---------- files, drag & drop, examples ---------- */
+function readFile(f, run) {
+  const r = new FileReader();
+  r.onload = () => { $('mode').value = 'auto'; setFile(f.name, r.result); if (run) doRun(); };
+  r.readAsText(f);
+}
+$('btnOpen').onclick = () => $('file').click();
+$('file').onchange = e => { if (e.target.files[0]) readFile(e.target.files[0], true); e.target.value = ''; };
+let dragDepth = 0;
+window.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
+  const f = e.dataTransfer.files[0];
+  if (f) readFile(f, true);
+});
+async function loadExample(path) {
+  const r = await fetch('/api/examples/' + path.split('/').map(encodeURIComponent).join('/'));
+  $('mode').value = 'auto';
+  setFile(path, await r.text());
+}
+$('examples').onchange = async e => {
+  if (e.target.value) await loadExample(e.target.value);
+  e.target.value = '';
+};
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.v));
+function activeTab() { return document.querySelector('.tab.active').dataset.v; }
+function showTab(v) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.v === v));
+  document.querySelectorAll('.view').forEach(x => x.classList.toggle('active', x.id === 'v-' + v));
+  if (v === 'tl') drawTimeline();
+}
+
+/* ---------- run ---------- */
+async function doRun(debug) {
+  const btn = $('btnRun');
+  btn.disabled = $('btnDebug').disabled = true;
+  $('status').textContent = (debug === true ? 'Đang chạy debug (' : 'Đang chạy (') + MODE_NAME[effMode()] + ')…';
+  const opts = getOpts();
+  if (debug === true) opts.debug = 1;
+  const t0 = performance.now();
+  try {
+    const r = await fetch('/api/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code.value, filename: fileName, options: opts }),
+    });
+    last = await r.json();
+    render(last);
+    $('status').textContent = (last.ok ? 'Xong' : 'Lỗi ' + last.phase) + ' · ' + ((performance.now() - t0) / 1000).toFixed(1) + ' s';
+  } catch (e) {
+    $('status').textContent = 'Không kết nối được server: ' + e;
+  } finally {
+    btn.disabled = $('btnDebug').disabled = false;
+  }
+}
+$('btnRun').onclick = () => doRun(false);
+$('btnDebug').onclick = () => {
+  if (effMode() !== 'freertos') { $('status').textContent = 'Debug từng dòng hiện chỉ hỗ trợ chế độ FreeRTOS'; return; }
+  doRun(true);
+};
+window.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) $('btnDebug').click(); else doRun(false); }
+});
+
+const hintsHtml = res => (res.hints || []).map(h => '<div class="hint">💡 ' + esc(h) + '</div>').join('');
+
+function render(res) {
+  const base = fileName.replace(/[^A-Za-z0-9_.+-]/g, '_');
+  let nErr = 0;
+  const logHtml = (res.log || '').split('\n').map(l => {
+    const m = l.match(/^([^:\s]+):(\d+):(\d+:)?\s*(error|warning|note)?/);
+    if (m && m[1] === base) {
+      const isErr = m[4] === 'error';
+      if (isErr) nErr++;
+      return '<span class="' + (isErr ? 'err-line' : 'warn-line') + '" data-line="' + m[2] + '">' + esc(l) + '</span>';
+    }
+    if (/undefined reference|error:|Error\b/.test(l)) { nErr++; return '<span class="stderr">' + esc(l) + '</span>'; }
+    return esc(l);
+  }).join('\n');
+  $('v-log').innerHTML = hintsHtml(res) + (res.log && res.log.trim() ? '<pre class="out">' + logHtml + '</pre>' : '<div class="empty">Không có lỗi hay cảnh báo.</div>');
+  $('v-log').querySelectorAll('[data-line]').forEach(s => s.onclick = () => gotoLine(+s.dataset.line));
+  $('errBadge').hidden = nErr === 0;
+  $('errBadge').textContent = nErr;
+  if (res.directives && Object.keys(res.directives).length && res.options) setOpts(res.options);   /* show what was used, not saved */
+
+  if (!res.ok) {
+    dbgInit(null);
+    $('v-out').innerHTML = hintsHtml(res) + '<div class="hint bad">Lỗi ở bước ' + esc(res.phase) + ' — xem tab Build (bấm vào dòng lỗi để nhảy tới code).</div>' +
+      (res.stdout ? '<pre class="out">' + esc(res.stdout) + '</pre>' : '');
+    $('v-tl').innerHTML = $('v-stat').innerHTML = '<div class="empty">Không có dữ liệu.</div>';
+    showTab('log');
+    return;
+  }
+  $('v-out').innerHTML = hintsHtml(res) +
+    (res.stdout ? '<pre class="out">' + esc(res.stdout) + '</pre>' : '<div class="empty">(không có output)</div>') +
+    (res.stderr ? '<pre class="out stderr">' + esc(res.stderr) + '</pre>' : '') +
+    '<div class="exitline">■ ' + esc(res.exit || '') + '</div>';
+  resetWindow();
+  renderStats();
+  dbgInit(res);
+  if (res.debug) showTab('dbg');
+  else if (activeTab() === 'log' || activeTab() === 'dbg') showTab('out');
+  else if (activeTab() === 'tl') drawTimeline();
+}
+
+/* ---------- trace helpers ---------- */
+function curTrace() { return last && last.ok ? last.trace : null; }
+function colorMap(tr) {
+  const m = {};
+  let i = 0;
+  for (const t of tr.tasks) if (!(t.name in m)) m[t.name] = t.name === 'IDLE' ? '#59606b' : t.name === 'Tmr Svc' ? '#8a6d3b' : COLORS[i++ % COLORS.length];
+  return m;
+}
+function fmt(tr, t) {
+  return tr.unit === 'us' ? (t / 1000).toFixed(Math.abs(t) < 10000 ? 3 : 2) + ' ms' : String(Math.round(t * 100) / 100);
+}
+function resetWindow() {
+  const tr = curTrace();
+  tlStart = 0;
+  if (!tr) { tlLen = 0; return; }
+  if (tr.unit === 'tick') tlLen = tr.total <= 200 ? tr.total : 100;
+  else tlLen = Math.min(tr.total, (tr.tick || 1000) * 50);
+}
+function niceStep(range, target) {
+  const raw = range / target, p = Math.pow(10, Math.floor(Math.log10(raw)));
+  return [1, 2, 5, 10].map(k => k * p).find(s => s >= raw) || 10 * p;
+}
+const isDelay = w => /^vTaskDelay|^Suspended|^Blocked|timer hết hạn/.test(w);
+
+/* ---------- timeline ---------- */
+function drawTimeline() {
+  const tr = curTrace(), v = $('v-tl');
+  if (!tr) { v.innerHTML = '<div class="empty">Chưa có dữ liệu.</div>'; return; }
+  if (!tr.scheduler_started) { v.innerHTML = '<div class="empty">Chưa có task nào chạy (scheduler chưa chạy / không có st_run()).</div>'; return; }
+  const cm = colorMap(tr);
+  const tasks = tr.tasks.slice().sort((a, b) => b.prio - a.prio || a.num - b.num);
+  const rows = [];
+  tasks.forEach(t => rows.push({ kind: 'task', h: 32, d: t }));
+  (tr.irqs || []).forEach(i => rows.push({ kind: 'isr', h: 24, d: i }));
+  (tr.objects || []).forEach(o => rows.push({ kind: 'obj', h: o.type === 'queue' || o.type === 'counting' ? 40 : 28, d: o }));
+  (tr.gpio || []).forEach(g => rows.push({ kind: 'gpio', h: 26, d: g }));
+  const W = Math.max(v.clientWidth - 24, 380), LW = 150, PW = W - LW - 12, top = 14;
+  const H = top + rows.reduce((s, r) => s + r.h, 0) + 30;
+  const t0 = tlStart, t1 = tlStart + tlLen, sx = t => LW + (t - t0) / tlLen * PW;
+  const vis = (a, b) => b >= t0 && a <= t1;
+  const X = a => sx(Math.max(a, t0)), X2 = b => sx(Math.min(b, t1));
+  let svg = '<svg width="' + W + '" height="' + H + '" role="img" aria-label="Timeline">';
+  /* grid */
+  const gridLine = t => '<line x1="' + sx(t).toFixed(1) + '" x2="' + sx(t).toFixed(1) + '" y1="' + top + '" y2="' + (H - 26) + '" stroke="var(--tick)" stroke-dasharray="2 3"/>';
+  if (tr.unit === 'tick') {
+    const g = Math.max(1, niceStep(tlLen, 40));
+    for (let t = Math.ceil(t0 / g) * g; t <= t1; t += g) svg += gridLine(t);
+  } else {
+    const ticks = tr.ticks.filter(t => t >= t0 && t <= t1), step = Math.max(1, Math.ceil(ticks.length / 50));
+    ticks.forEach((t, i) => { if (i % step === 0) svg += gridLine(t); });
+  }
+  const bar = (x1, x2, cy, color, tip, label, h) => {
+    const w = Math.max(x2 - x1, 1), hh = h || 14;
+    let s = '<rect x="' + x1.toFixed(1) + '" y="' + (cy - hh / 2) + '" width="' + w.toFixed(1) + '" height="' + hh + '" rx="2" fill="' + color + '" data-tip="' + esc(tip) + '"/>';
+    if (label && w > 7 * label.length + 6) s += '<text class="barlbl" x="' + ((x1 + x2) / 2).toFixed(1) + '" y="' + (cy + 4) + '" text-anchor="middle">' + esc(label) + '</text>';
+    return s;
+  };
+  const label = (y, h, name, sub, color) =>
+    '<text x="6" y="' + (y + h / 2 + (sub ? 0 : 4)) + '" style="fill:' + color + ';font-weight:600">' + esc(name.length > 18 ? name.slice(0, 17) + '…' : name) + '</text>' +
+    (sub ? '<text class="sub" x="6" y="' + (y + h / 2 + 12) + '">' + esc(sub) + '</text>' : '') +
+    '<line x1="' + LW + '" x2="' + (LW + PW) + '" y1="' + (y + h) + '" y2="' + (y + h) + '" stroke="var(--line)"/>';
+  let y = top, sep = null;
+  for (const row of rows) {
+    const d = row.d, h = row.h, cy = y + h / 2;
+    if (sep !== null && sep !== row.kind) svg += '<line x1="0" x2="' + (LW + PW) + '" y1="' + y + '" y2="' + y + '" stroke="var(--muted)" stroke-opacity=".5"/>';
+    sep = row.kind;
+    if (row.kind === 'task') {
+      const color = cm[d.name];
+      svg += label(y, h, d.name, 'p' + d.prio + (d.fn ? ' · ' + d.fn : ''), color);
+      for (const [a, b] of d.ready || []) if (vis(a, b))
+        svg += '<line x1="' + X(a).toFixed(1) + '" x2="' + Math.max(X2(b), X(a) + 1).toFixed(1) + '" y1="' + cy + '" y2="' + cy +
+               '" stroke="' + color + '" stroke-opacity=".6" stroke-width="2" stroke-dasharray="3 3" data-tip="' + esc(d.name) + ': Ready ' + fmt(tr, a) + ' → ' + fmt(tr, b) + '"/>';
+      for (const [a, b, w] of d.blocked || []) if (vis(a, b)) {
+        const dl = isDelay(w);
+        svg += '<line x1="' + X(a).toFixed(1) + '" x2="' + Math.max(X2(b), X(a) + 1).toFixed(1) + '" y1="' + (cy + 9) + '" y2="' + (cy + 9) +
+               '" stroke="' + (dl ? 'var(--tick)' : 'var(--wait)') + '" stroke-width="' + (dl ? 2 : 3) + '" data-tip="' + esc(d.name) + ': Blocked — ' + esc(w) + '\n' + fmt(tr, a) + ' → ' + fmt(tr, b) + ' (' + fmt(tr, b - a) + ')"/>';
+      }
+      for (const [a, b] of d.run) if (vis(a, b))
+        svg += bar(X(a), X2(b), cy, color, d.name + ': chạy ' + fmt(tr, a) + ' → ' + fmt(tr, b) + ' (' + fmt(tr, b - a) + ')');
+      for (const [t, from] of d.notify || []) if (vis(t, t)) {
+        const x = sx(t);
+        svg += '<path d="M' + x + ',' + (y + 2) + 'l4,4l-4,4l-4,-4z" fill="var(--wait)" data-tip="notify từ ' + esc(from) + ' tại ' + fmt(tr, t) + '"/>';
+      }
+      for (const [t, p, k] of d.prio_changes || []) if (vis(t, t)) {
+        const inh = k === 'inherit', dis = k === 'disinherit';
+        svg += '<circle cx="' + sx(t) + '" cy="' + (y + 5) + '" r="' + (inh || dis ? 4 : 3) + '" fill="' + (inh ? 'var(--wait)' : 'none') + '" stroke="' + (inh || dis ? 'var(--wait)' : color) +
+               '" data-tip="' + (inh ? 'kế thừa ưu tiên (mutex) → p' : dis ? 'trả ưu tiên kế thừa → p' : 'đổi ưu tiên → p') + p + ' tại ' + fmt(tr, t) + '"/>';
+      }
+      if (d.deleted !== null && d.deleted !== undefined && vis(d.deleted, d.deleted))
+        svg += '<text x="' + sx(d.deleted) + '" y="' + (cy + 4) + '" style="fill:var(--err)" data-tip="xoá/kết thúc tại ' + fmt(tr, d.deleted) + '">✕</text>';
+    } else if (row.kind === 'isr') {
+      svg += label(y, h, 'ISR ' + d.name, 'IRQ ' + d.irq, 'var(--isr)');
+      const runs = d.runs.filter(([a, b]) => vis(a, b)), step = Math.max(1, Math.ceil(runs.length / 600));
+      runs.forEach(([a, b], i) => {
+        if (i % step) return;
+        const x = X(a);
+        svg += '<rect x="' + (x - 1).toFixed(1) + '" y="' + (y + 4) + '" width="' + Math.max(X2(b) - x, 2.5).toFixed(1) + '" height="' + (h - 8) + '" fill="var(--isr)" data-tip="ISR ' + esc(d.name) + ' tại ' + fmt(tr, a) + ' (' + Math.max(b - a, 0) + ' µs)"/>';
+      });
+    } else if (row.kind === 'obj') {
+      svg += label(y, h, d.name, TYPE_NAME[d.type] + (d.len > 1 ? ' [' + d.len + ']' : '') + (d.type === 'timer' ? ' ' + d.period + ' tick' + (d.auto ? ' auto' : ' one-shot') : ''), 'var(--text)');
+      if (d.type === 'timer') {
+        for (const t of d.expired) if (vis(t, t)) {
+          const x = sx(t);
+          svg += '<path d="M' + (x - 5) + ',' + (y + h - 5) + 'L' + x + ',' + (y + 6) + 'L' + (x + 5) + ',' + (y + h - 5) + 'Z" fill="var(--accent)" data-tip="' + esc(d.name) + ' hết hạn tại ' + fmt(tr, t) + ' → callback trong Tmr Svc"/>';
+        }
+      } else if (d.type === 'eventgroup') {
+        for (const [t, op, who, bits] of d.ops) if (vis(t, t)) {
+          const x = sx(t), set = op === 'e';
+          svg += '<path d="' + (set ? 'M' + (x - 4) + ',' + (cy + 5) + 'L' + x + ',' + (cy - 5) + 'L' + (x + 4) + ',' + (cy + 5) + 'Z' : 'M' + (x - 4) + ',' + (cy - 5) + 'L' + x + ',' + (cy + 5) + 'L' + (x + 4) + ',' + (cy - 5) + 'Z') +
+                 '" fill="' + (set ? 'var(--ok)' : 'var(--muted)') + '" data-tip="' + (set ? 'set' : 'clear') + ' bit 0x' + bits.toString(16) + ' — ' + esc(who) + ' tại ' + fmt(tr, t) + '"/>';
+        }
+      } else if (d.type === 'mutex' || d.type === 'recursive') {
+        for (const [a, b, who] of d.holder) if (vis(a, b))
+          svg += bar(X(a), X2(b), cy, cm[who] || '#888', esc(d.name) + ' do ' + who + ' giữ ' + fmt(tr, a) + ' → ' + fmt(tr, b) + ' (' + fmt(tr, b - a) + ')', who, 12);
+      }
+      if (d.level && d.type !== 'eventgroup' && d.type !== 'mutex' && d.type !== 'recursive') {
+        const max = Math.max(d.len, d.max, 1), yb = y + h - 4, yt = y + 5, ly = l => yb - (yb - yt) * l / max;
+        const pts = d.level.filter(([t]) => t <= t1);
+        let cur = 0, start = -1;
+        for (let i = 0; i < pts.length; i++) { if (pts[i][0] <= t0) start = i; }
+        if (start >= 0) cur = pts[start][1];
+        let path = 'M' + LW + ',' + ly(cur).toFixed(1), shown = 0;
+        for (let i = Math.max(start + 1, 0); i < pts.length; i++) {
+          if (++shown > 4000) break;
+          path += 'H' + sx(pts[i][0]).toFixed(1) + 'V' + ly(pts[i][1]).toFixed(1);
+          cur = pts[i][1];
+        }
+        path += 'H' + (LW + PW);
+        svg += '<path d="' + path + 'V' + yb + 'H' + LW + 'Z" fill="var(--accent)" fill-opacity=".15" stroke="none"/>' +
+               '<path d="' + path + '" fill="none" stroke="var(--accent)" stroke-width="1.5" data-tip="' + esc(d.name) + ': số phần tử theo thời gian (tối đa ' + d.len + ')"/>' +
+               '<text class="sub" x="' + (LW + PW - 2) + '" y="' + (yt + 6) + '" text-anchor="end">' + max + '</text>';
+        for (const [t, op, who] of d.ops) if ((op === 's' || op === 'g') && vis(t, t))
+          svg += '<text x="' + sx(t) + '" y="' + (y + 11) + '" style="fill:var(--err);font-size:11px;font-weight:700" text-anchor="middle" data-tip="' + esc(who) + ': ' + (op === 's' ? 'gửi thất bại (đầy, hết thời gian chờ)' : 'nhận thất bại (rỗng, hết thời gian chờ)') + ' tại ' + fmt(tr, t) + '">×</text>';
+      }
+    } else if (row.kind === 'gpio') {
+      svg += label(y, h, d.name, 'GPIO ' + d.pin, 'var(--gpio)');
+      const yh = y + 5, yl = y + h - 5, ch = d.changes;
+      let lv = 0;
+      for (const [t, l] of ch) { if (t <= t0) lv = l; }
+      let path = 'M' + LW + ',' + (lv ? yh : yl), fill = '';
+      let xa = LW;
+      for (const [t, l] of ch) {
+        if (t <= t0 || t > t1) continue;
+        const x = sx(t).toFixed(1);
+        if (lv) fill += '<rect x="' + xa + '" y="' + yh + '" width="' + Math.max(x - xa, 0) + '" height="' + (yl - yh) + '" fill="var(--gpio)" fill-opacity=".15"/>';
+        path += 'H' + x + 'V' + (l ? yh : yl);
+        lv = l; xa = +x;
+      }
+      if (lv) fill += '<rect x="' + xa + '" y="' + yh + '" width="' + Math.max(LW + PW - xa, 0) + '" height="' + (yl - yh) + '" fill="var(--gpio)" fill-opacity=".15"/>';
+      svg += fill + '<path d="' + path + 'H' + (LW + PW) + '" fill="none" stroke="var(--gpio)" stroke-width="1.6" data-tip="' + esc(d.name) + ': mức logic (cao = 1)"/>';
+    }
+    y += h;
+  }
+  /* current debug step */
+  if (DBG && DBG.steps[DBG.i] && vis(DBG.steps[DBG.i].t * 1000, DBG.steps[DBG.i].t * 1000)) {
+    const x = sx(DBG.steps[DBG.i].t * 1000).toFixed(1);
+    svg += '<line x1="' + x + '" x2="' + x + '" y1="' + top + '" y2="' + (H - 26) + '" stroke="var(--err)" stroke-width="1.5" data-tip="bước debug ' + (DBG.i + 1) + '"/>';
+  }
+  /* markers (C mode st_mark) */
+  for (const [t, m] of tr.marks || []) if (vis(t, t)) {
+    const x = sx(t).toFixed(1);
+    svg += '<line x1="' + x + '" x2="' + x + '" y1="' + (top - 4) + '" y2="' + (H - 26) + '" stroke="var(--warn)" data-tip="' + esc(m) + ' @ ' + fmt(tr, t) + '"/>' +
+           '<text x="' + x + '" y="' + (top - 4) + '" class="axis" style="fill:var(--warn)">' + esc(m.slice(0, 12)) + '</text>';
+  }
+  /* axis */
+  const ay = H - 14;
+  if (tr.unit === 'tick') {
+    const g = Math.max(1, niceStep(tlLen, 10));
+    for (let t = Math.ceil(t0 / g) * g; t <= t1; t += g)
+      svg += '<text class="axis" x="' + sx(t) + '" y="' + ay + '" text-anchor="middle">' + t + '</text>';
+  } else {
+    for (let k = 0; k <= 5; k++) {
+      const t = t0 + tlLen * k / 5;
+      svg += '<text class="axis" x="' + sx(t) + '" y="' + ay + '" text-anchor="' + (k === 0 ? 'start' : k === 5 ? 'end' : 'middle') + '">' + fmt(tr, t) + '</text>';
+    }
+  }
+  svg += '</svg>';
+  const uName = tr.unit === 'us' ? 'ms' : 'tick', div = tr.unit === 'us' ? 1000 : 1;
+  const legend = '<span class="legend"><span><i style="background:var(--accent)"></i>Running</span>' +
+    '<span><i style="background:repeating-linear-gradient(90deg,var(--ready) 0 3px,transparent 3px 6px);height:2px"></i>Ready</span>' +
+    '<span><i style="background:var(--wait);height:3px"></i>Blocked: chờ queue/semaphore/mutex/notify/event</span>' +
+    '<span><i style="background:var(--tick);height:2px"></i>Blocked: delay/suspend</span>' +
+    '<span><b style="color:var(--wait)">◆</b> notify · <b style="color:var(--wait)">●</b> kế thừa ưu tiên</span>' +
+    (tr.irqs && tr.irqs.length ? '<span><i style="background:var(--isr);width:3px"></i>ISR</span>' : '') +
+    (tr.gpio && tr.gpio.length ? '<span><i style="background:var(--gpio);height:2px"></i>GPIO</span>' : '') + '</span>';
+  v.innerHTML =
+    '<div class="tl-ctl">' +
+      '<label>Bắt đầu <input type="number" id="tlS" step="1" min="0" value="' + +(t0 / div).toFixed(2) + '"> ' + uName + '</label>' +
+      '<label>Độ dài <input type="number" id="tlL" step="1" min="0.1" value="' + +(tlLen / div).toFixed(2) + '"> ' + uName + '</label>' +
+      (tr.unit === 'us' && tr.tick ? '<span>≈ ' + (tlLen / tr.tick).toFixed(1) + ' tick</span>' : '') +
+      '<button id="tlPrev">◀</button><button id="tlNext">▶</button><button id="tlIn">＋</button><button id="tlOut">－</button><button id="tlAll">Toàn bộ</button>' +
+    '</div><div class="tl-ctl">' + legend + '</div>' + svg +
+    (tr.truncated ? '<div class="hint">Trace quá dài, đã cắt bớt.</div>' : '');
+  const total = tr.total, minLen = tr.unit === 'us' ? 100 : 2;
+  const set = (s, l) => { tlLen = Math.min(Math.max(l, minLen), total); tlStart = Math.min(Math.max(s, 0), Math.max(total - tlLen, 0)); drawTimeline(); };
+  $('tlS').onchange = e => set(+e.target.value * div, tlLen);
+  $('tlL').onchange = e => set(tlStart, +e.target.value * div);
+  $('tlPrev').onclick = () => set(tlStart - tlLen * .8, tlLen);
+  $('tlNext').onclick = () => set(tlStart + tlLen * .8, tlLen);
+  $('tlIn').onclick = () => set(tlStart + tlLen / 4, tlLen / 2);
+  $('tlOut').onclick = () => set(tlStart - tlLen / 2, tlLen * 2);
+  $('tlAll').onclick = () => set(0, total);
+}
+window.addEventListener('resize', () => { if (last && activeTab() === 'tl') drawTimeline(); });
+document.addEventListener('mousemove', e => {
+  const tip = $('tip'), t = e.target.closest && e.target.closest('[data-tip]');
+  if (!t) { tip.style.display = 'none'; return; }
+  tip.textContent = t.dataset.tip;
+  tip.style.display = 'block';
+  tip.style.left = Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 8) + 'px';
+  tip.style.top = (e.clientY + 14) + 'px';
+});
+
+/* ---------- statistics ---------- */
+function renderStats() {
+  const res = last, tr = curTrace();
+  if (!res || !tr) { $('v-stat').innerHTML = '<div class="empty">Chưa có dữ liệu.</div>'; return; }
+  $('v-stat').innerHTML = statsKernel(res, tr);
+}
+function meter(frac, color) {
+  return '<div class="meter"><div style="width:' + Math.min(Math.max(frac, 0), 1) * 100 + '%;background:' + color + '"></div></div>';
+}
+function statsKernel(res, tr) {
+  const o = res.options, cm = colorMap(tr);
+  const lanes = tr.tasks.slice().sort((a, b) => b.prio - a.prio || a.num - b.num);
+  let h = '';
+  if (res.mode === 'freertos') {
+    h += '<h3>Cấu hình</h3><div class="cfg">' +
+      [(MCUS[o.mcu] || {}).name || o.mcu, 'configUSE_PREEMPTION=' + o.preemption, 'configUSE_TIME_SLICING=' + o.time_slicing, 'configIDLE_SHOULD_YIELD=' + o.idle_should_yield,
+       'configTICK_RATE_HZ=' + o.tick_rate, 'heap_' + o.heap + '.c', 'configTOTAL_HEAP_SIZE=' + o.heap_size, 'configSUPPORT_STATIC_ALLOCATION=' + o.static_alloc]
+        .map(x => '<code>' + esc(x) + '</code>').join('') + '</div>';
+  }
+  h += '<h3>Task (' + fmt(tr, tr.total) + ' mô phỏng)</h3><table><tr><th>Task</th><th class="num">Ưu tiên</th><th class="num">CPU</th><th class="num">CPU %</th><th style="width:16%"></th><th class="num">Vào Running</th><th>Block lâu nhất vì</th></tr>';
+  for (const t of lanes) {
+    const by = Object.entries(t.blocked_by || {}).sort((a, b) => b[1] - a[1]).slice(0, 2);
+    h += '<tr><td style="color:' + cm[t.name] + ';font-weight:600">' + esc(t.name) + (t.instances > 1 ? ' ×' + t.instances : '') + '</td><td class="num">' + t.prio +
+      '</td><td class="num">' + fmt(tr, t.cpu) + '</td><td class="num">' + t.cpu_pct.toFixed(2) +
+      '</td><td><div class="bar" style="width:' + Math.min(t.cpu_pct, 100) + '%;background:' + cm[t.name] + '"></div></td><td class="num">' + t.switch_ins +
+      '</td><td>' + by.map(([w, d]) => esc(w) + ' <span style="color:var(--muted)">' + fmt(tr, d) + '</span>').join('<br>') + '</td></tr>';
+  }
+  h += '</table>';
+  if (res.mode !== 'freertos') return h;
+  if ((tr.objects || []).length) {
+    h += '<h3>Đối tượng kernel</h3><table><tr><th>Tên</th><th>Loại</th><th class="num">Dung lượng</th><th class="num">Gửi/Give</th><th class="num">Nhận/Take</th><th class="num">Gửi lỗi</th><th class="num">Nhận lỗi</th><th class="num">Cao nhất</th><th>Ghi chú</th></tr>';
+    for (const ob of tr.objects) {
+      if (ob.type === 'timer') {
+        h += '<tr><td>' + esc(ob.name) + '</td><td>timer ' + (ob.auto ? 'auto-reload' : 'one-shot') + '</td><td class="num">' + ob.period + ' tick</td><td colspan="5"></td><td>hết hạn ' + ob.expired.length + ' lần</td></tr>';
+      } else if (ob.type === 'eventgroup') {
+        h += '<tr><td>' + esc(ob.name) + '</td><td>event group</td><td></td><td class="num">' + ob.sends + '</td><td class="num">' + ob.recvs + '</td><td colspan="3"></td><td>set / clear bit</td></tr>';
+      } else {
+        const held = (ob.holder || []).reduce((s, [a, b]) => s + b - a, 0);
+        h += '<tr><td>' + esc(ob.name) + '</td><td>' + TYPE_NAME[ob.type] + '</td><td class="num">' + ob.len + '</td><td class="num">' + ob.sends + '</td><td class="num">' + ob.recvs +
+          '</td><td class="num"' + (ob.send_fail ? ' style="color:var(--err)"' : '') + '>' + ob.send_fail + '</td><td class="num"' + (ob.recv_fail ? ' style="color:var(--err)"' : '') + '>' + ob.recv_fail +
+          '</td><td class="num">' + ob.max + '</td><td>' + (ob.holder && ob.holder.length ? 'bị giữ ' + fmt(tr, held) : '') + '</td></tr>';
+      }
+    }
+    h += '</table>';
+  }
+  if ((tr.irqs || []).length) {
+    h += '<h3>Ngắt (ISR)</h3><table><tr><th>ISR</th><th class="num">IRQ</th><th class="num">Số lần</th><th class="num">portYIELD_FROM_ISR(pdTRUE)</th><th class="num">Thời gian trong ISR (máy tính)</th></tr>' +
+      tr.irqs.map(i => '<tr><td>' + esc(i.name) + '</td><td class="num">' + i.irq + '</td><td class="num">' + i.count + '</td><td class="num">' + i.yields + '</td><td class="num">' + fmt(tr, i.busy) + '</td></tr>').join('') + '</table>';
+  }
+  if ((tr.misuse || []).length)
+    h += '<div class="hint bad">Gọi API của task trong ISR: ' + esc([...new Set(tr.misuse.map(m => m[2] + ' trong ISR ' + m[1]))].join(', ')) + '</div>';
+  if (res.mcu) h += mcuHtml(res.mcu);
+  h += heapHtml(tr);
+  return h;
+}
+function mcuHtml(rep) {
+  let h = '<h3>RAM — ' + esc(rep.mcu_name) + '</h3>';
+  if (rep.ram) {
+    const f = rep.ram_total / rep.ram;
+    h += '<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><b>' + rep.ram_total + ' / ' + rep.ram + ' B</b> (' + (f * 100).toFixed(0) + '%)' +
+         '<div style="flex:1">' + meter(f, f > 1 ? 'var(--err)' : f > .85 ? 'var(--warn)' : 'var(--ok)') + '</div></div>';
+  } else {
+    h += '<p>Ước tính: <b>' + rep.ram_total + ' B</b> (chọn một MCU để so với RAM của chip)</p>';
+  }
+  h += '<table>' + rep.ram_parts.map(([n, v]) => '<tr><td>' + esc(n) + '</td><td class="num">' + v + ' B</td></tr>').join('') + '</table>';
+  h += '<h3>Stack từng task (ước lượng tĩnh)</h3><table><tr><th>Task</th><th>Hàm</th><th class="num">Cần ≈</th><th class="num">Được cấp</th><th style="width:16%"></th><th>Trạng thái</th><th>Ghi chú</th></tr>';
+  for (const t of rep.tasks) {
+    const st = { ok: ['OK', 'st-ok'], tight: ['SÁT (dư < 20%)', 'st-tight'], overflow: ['TRÀN', 'st-overflow'], unknown: ['không phân tích được', ''] }[t.status] || ['', ''];
+    const f = t.used && t.have ? t.used / t.have : 0;
+    h += '<tr><td>' + esc(t.task) + '</td><td><code>' + esc(t.fn || '?') + '</code></td><td class="num">' + (t.used !== undefined ? t.used + ' B' : '–') +
+      '</td><td class="num">' + (t.have ? t.have + ' B<br><span style="color:var(--muted)">' + t.words + ' word</span>' : '–') +
+      '</td><td>' + (f ? meter(f, f > 1 ? 'var(--err)' : f > .8 ? 'var(--warn)' : 'var(--ok)') : '') +
+      '</td><td class="' + st[1] + '">' + st[0] + '</td><td style="font-size:12px;color:var(--muted)">' + esc((t.notes || []).join('; ')) + '</td></tr>';
+  }
+  h += '</table><p class="note">"Cần" = độ sâu stack lớn nhất theo đồ thị lời gọi tĩnh (gcc -fstack-usage -fcallgraph-info, ' + esc(rep.arch) + ') + ' + rep.ctx +
+       ' B khung context mà port Cortex-M đẩy lên stack khi chuyển task. Không tính đệ quy, con trỏ hàm, alloca; printf giả định ≈ 400 B. ' +
+       'Đây là ước lượng: số thật trên chip phụ thuộc compiler ARM và thư viện C. Trên máy tính task chạy trên stack của pthread, nên tràn stack không gây lỗi khi mô phỏng.</p>';
+  return h + rep.notes.map(n => '<div class="hint">' + esc(n) + '</div>').join('');
+}
+function heapHtml(tr) {
+  const heap = tr.heap || [];
+  let h = '<h3>Heap (heap_' + tr.heap_scheme + ', ' + tr.heap_size + ' byte)</h3>';
+  if (!heap.length) return h + '<div class="empty">Không có lần cấp phát nào.</div>';
+  const known = heap.filter(x => x.free >= 0);
+  if (known.length) {
+    const minFree = Math.min(...known.map(x => x.free));
+    h += '<p>Còn trống cuối cùng: <b>' + known[known.length - 1].free + '</b> byte · Thấp nhất: <b>' + minFree + '</b> byte · ' +
+         heap.filter(x => x.op === 'M').length + ' lần pvPortMalloc, ' + heap.filter(x => x.op === 'F').length + ' lần vPortFree</p>';
+    h += heapChart(known, tr);
+  } else {
+    h += '<p>heap_3 dùng malloc() của thư viện C: không có số byte còn trống.</p>';
+  }
+  h += '<table><tr><th class="num">t</th><th>Thao tác</th><th class="num">Kích thước</th><th class="num">Còn trống</th><th>Gọi từ task</th><th>Địa chỉ</th></tr>';
+  for (const x of heap.slice(0, 300)) {
+    const fail = x.op === 'M' && x.addr === 0;
+    h += '<tr' + (fail ? ' class="stderr"' : '') + '><td class="num">' + (x.t < 0 ? 'trước scheduler' : fmt(tr, x.t)) + '</td><td>' +
+      (x.op === 'M' ? (fail ? 'pvPortMalloc → NULL' : 'pvPortMalloc') : 'vPortFree') + '</td><td class="num">' + (x.size >= 0 ? x.size : '–') +
+      '</td><td class="num">' + (x.free >= 0 ? x.free : '–') + '</td><td>' + esc(x.task_name) + '</td><td style="font-family:ui-monospace,monospace;font-size:12px">0x' + x.addr.toString(16) + '</td></tr>';
+  }
+  return h + '</table>' + (heap.length > 300 ? '<p>… ' + (heap.length - 300) + ' dòng nữa</p>' : '');
+}
+function heapChart(pts, tr) {
+  const W = 640, H = 130, L = 56, R = 10, T = 8, B = 22;
+  const tmin = Math.min(0, pts[0].t), tmax = Math.max(tr.total, 1);
+  const fmin = Math.min(...pts.map(p => p.free)), fmax = tr.heap_size;
+  const lo = Math.max(0, fmin - (fmax - fmin) * 0.15);
+  const sx = t => L + (t - tmin) / (tmax - tmin) * (W - L - R), sy = f => T + (1 - (f - lo) / Math.max(fmax - lo, 1)) * (H - T - B);
+  let d = '';
+  pts.forEach((p, i) => { d += (i ? 'H' + sx(p.t).toFixed(1) + 'V' : 'M' + sx(p.t).toFixed(1) + ',') + sy(p.free).toFixed(1); });
+  d += 'H' + sx(tmax).toFixed(1);
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="max-width:' + W + 'px" role="img" aria-label="Heap free bytes">' +
+    '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + sy(fmax) + '" y2="' + sy(fmax) + '" stroke="var(--line)" stroke-dasharray="3 3"/>' +
+    '<text class="axis" x="' + (L - 6) + '" y="' + (sy(fmax) + 4) + '" text-anchor="end">' + fmax + '</text>' +
+    '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + sy(fmin) + '" y2="' + sy(fmin) + '" stroke="var(--err)" stroke-opacity=".5" stroke-dasharray="3 3"/>' +
+    '<text class="axis" x="' + (L - 6) + '" y="' + (sy(fmin) + 4) + '" text-anchor="end">' + fmin + '</text>' +
+    '<path d="' + d + '" fill="none" stroke="var(--accent)" stroke-width="2"/>' +
+    '<text class="axis" x="' + L + '" y="' + (H - 4) + '">' + fmt(tr, tmin) + '</text>' +
+    '<text class="axis" x="' + (W - R) + '" y="' + (H - 4) + '" text-anchor="end">' + fmt(tr, tmax) + ' · byte còn trống theo thời gian</text></svg>';
+}
+
+/* ---------- debugger (record & replay) ---------- */
+let DBG = null;
+const KIND_NAME = { line: 'khối lệnh', call: 'lời gọi', loop: 'vòng lặp', sched: 'scheduler', obj: 'đối tượng kernel', isr: 'ngắt', out: 'output',
+                    task: 'tạo task', prio: 'ưu tiên', gpio: 'GPIO', heap: 'heap', warn: 'cảnh báo' };
+const KIND_WHY = {
+  line: 'CPU vào một khối lệnh cơ bản (không rẽ nhánh) bắt đầu ở dòng tô đậm; các dòng tô nhạt thuộc cùng khối.',
+  call: 'Lời gọi API kernel / ngoại vi / in ở dòng này. Các bước kernel ngay sau là hệ quả của lời gọi.',
+  loop: 'Vòng lặp không gọi API (busy loop): simulator gộp các lần lặp thành một bước.',
+  out: 'Dữ liệu được ghi ra stdout (trên MCU: UART/semihosting).',
+  isr: 'CPU tạm dừng task đang chạy để phục vụ ngắt; trong ISR chỉ được dùng API ...FromISR().',
+  obj: 'Kernel thay đổi queue / semaphore / mutex / event group / notification / timer.',
+  task: 'xTaskCreate cấp phát TCB + stack từ heap và đưa task vào danh sách Ready.',
+  prio: 'Ưu tiên của task thay đổi; scheduler xét lại ngay task nào được chạy.',
+  gpio: 'Mức logic của chân GPIO thay đổi.',
+  heap: 'Cấp phát / giải phóng bộ nhớ từ heap của FreeRTOS.',
+  warn: 'Dùng sai API: trên phần cứng có thể làm hỏng kernel.',
+};
+function schedWhy(st) {
+  if (/→ Running/.test(st.x)) return 'Scheduler chọn task Ready có ưu tiên cao nhất để chạy (chuyển ngữ cảnh).';
+  if (/→ Ready \(nhường/.test(st.x)) return 'Task vẫn sẵn sàng nhưng rời CPU: task ưu tiên cao hơn vừa Ready (preemption), hết time slice (tick), hoặc gọi taskYIELD().';
+  if (/→ Ready/.test(st.x)) return 'Sự kiện task chờ đã xảy ra hoặc hết thời gian chờ: task chuyển Blocked → Ready.';
+  if (/→ Blocked/.test(st.x)) return 'Task gọi API chặn nên rời CPU và không dùng CPU cho đến khi sự kiện xảy ra hoặc hết thời gian chờ.';
+  return 'Trạng thái task thay đổi.';
+}
+function dbgInit(res) {
+  DBG = res && res.ok && res.debug ? { ...res.debug, i: 0, cps: [], stdout: res.stdout || '', filter: '' } : null;
+  if (!DBG) {
+    $('hl').innerHTML = '';
+    if (res && res.ok && !res.debug) $('v-dbg').innerHTML = '<div class="empty">Lần chạy này không bật debug. Bấm 🐞 Debug.</div>';
+    return;
+  }
+  DBG.colors = colorMap(res.trace);
+  DBG.i = Math.max(0, DBG.steps.findIndex(s => s.t >= 0));
+  const names = Object.values(DBG.tasks).filter(n => n !== 'IDLE');
+  $('v-dbg').innerHTML =
+    '<div class="dbg-bar">' +
+      '<button id="dFirst" title="Về đầu">⏮</button><button id="dBack" title="Lùi một bước (←)">◀ Lùi</button>' +
+      '<button id="dNext" class="primary" title="Bước tiếp (→)">Bước ▶</button>' +
+      '<button id="dKernel" title="Tới thao tác kernel kế tiếp (bỏ qua dòng lệnh)">⏭ Sự kiện kernel</button>' +
+      '<button id="dBp" title="Chạy tới dòng có breakpoint (bấm số dòng để đặt)">▶▶ Tới breakpoint</button>' +
+      '<label style="font-size:13px">Theo dõi <select id="dFilter"><option value="">mọi task/ISR</option>' + names.map(n => '<option>' + esc(n) + '</option>').join('') + '</select></label>' +
+      '<span class="pos" id="dPos"></span></div>' +
+    '<input type="range" id="dbgSlider" min="0" max="' + (DBG.steps.length - 1) + '" value="' + DBG.i + '" aria-label="Tua bước">' +
+    '<div class="opcard" id="dOp"></div>' +
+    '<div class="dgrid"><div><h3>Task</h3><div id="dTasks"></div><h3>Đối tượng kernel</h3><div id="dObjs"></div><div id="dHw"></div></div>' +
+    '<div><h3>Nhật ký bước</h3><div class="log" id="dLog"></div><h3>Output đến bước này</h3><pre class="out" id="dOut" style="max-height:180px;overflow:auto"></pre></div></div>' +
+    (DBG.truncated ? '<div class="hint">Đã ghi tối đa ' + DBG.steps.length + ' bước; giảm thời gian chạy để xem phần sau.</div>' : '');
+  $('dFirst').onclick = () => dbgGo(0);
+  $('dBack').onclick = () => dbgMove(-1, () => true);
+  $('dNext').onclick = () => dbgMove(1, () => true);
+  $('dKernel').onclick = () => dbgMove(1, s => !['line', 'call', 'loop'].includes(s.k));
+  $('dBp').onclick = () => {
+    if (!BPS.size) { $('status').textContent = 'Chưa có breakpoint: bấm số dòng bên trái editor'; return; }
+    if (!dbgMove(1, s => s.L && s.L.some(l => BPS.has(l)))) $('status').textContent = 'Không còn bước nào đi qua breakpoint';
+  };
+  $('dFilter').onchange = e => { DBG.filter = e.target.value; };
+  $('dbgSlider').oninput = e => dbgGo(+e.target.value);
+  $('dLog').onclick = e => { const r = e.target.closest('[data-i]'); if (r) dbgGo(+r.dataset.i); };
+  dbgGo(DBG.i);
+}
+function dbgMatch(st) {
+  const f = DBG.filter;
+  return !f || st.c === f || (st.s && DBG.tasks[st.s[0]] === f) || (st.k === 'sched' && st.x.startsWith(f + ' '));
+}
+function dbgMove(dir, pred) {
+  for (let j = DBG.i + dir; j >= 0 && j < DBG.steps.length; j += dir)
+    if (dbgMatch(DBG.steps[j]) && pred(DBG.steps[j])) { dbgGo(j); return true; }
+  return false;
+}
+function dbgApply(S, st) {
+  if (st.new) S.tasks[st.new[0]] = { name: st.new[1], prio: st.new[2], state: 'Ready', why: '', line: null };
+  if (st.s && S.tasks[st.s[0]]) { S.tasks[st.s[0]].state = st.s[1]; S.tasks[st.s[0]].why = st.s[2]; }
+  if (st.pr && S.tasks[st.pr[0]]) S.tasks[st.pr[0]].prio = st.pr[1];
+  if (st.newobj) S.objs[st.newobj[0]] = { name: st.newobj[1], type: st.newobj[2], len: st.newobj[3], level: 0, holder: '' };
+  if (st.o && S.objs[st.o[0]]) { if (st.o[1] !== null) S.objs[st.o[0]].level = st.o[1]; if (st.o[2] !== null && st.o[2] !== undefined) S.objs[st.o[0]].holder = st.o[2]; }
+  if (st.out !== undefined) S.out = st.out;
+  if (st.L && st.ctx !== undefined && S.tasks[st.ctx]) S.tasks[st.ctx].line = st.L[0];
+  if (st.isr !== undefined) S.isr = st.isr;
+  if (st.g) S.gpio[st.g[0]] = st.g[1];
+  if (st.hp !== undefined && st.hp >= 0) S.heap = st.hp;
+  S.tick = st.tk;
+}
+function dbgState(i) {
+  const K = 500, c = Math.floor(i / K);
+  let S, from;
+  for (let k = Math.min(c, DBG.cps.length - 1); k >= 0; k--) if (DBG.cps[k]) { S = JSON.parse(DBG.cps[k]); from = k * K; break; }
+  if (!S) { S = { tasks: {}, objs: {}, out: 0, isr: -1, gpio: {}, heap: null, tick: 0 }; from = 0; }
+  for (let j = from; j <= i; j++) {
+    if (j % K === 0 && !DBG.cps[j / K]) DBG.cps[j / K] = JSON.stringify(S);
+    dbgApply(S, DBG.steps[j]);
+  }
+  return S;
+}
+function dbgPaint() {
+  const hl = $('hl');
+  if (!hl) return;
+  const lh = 19.5, pad = 8;
+  let h = '';
+  for (const l of BPS) h += '<div class="bp" style="top:' + (pad + (l - 1) * lh) + 'px"></div>';
+  if (DBG) {
+    const st0 = DBG.steps[DBG.i], col = DBG.colors[st0.c] || (st0.c && st0.c.startsWith('ISR') ? 'var(--isr)' : 'var(--accent)');
+    let st = st0;
+    for (let j = DBG.i; !st.L && j > Math.max(0, DBG.i - 60); j--)          /* kernel event: show the line that caused it */
+      if (DBG.steps[j - 1].L && DBG.steps[j - 1].c === st0.c) st = DBG.steps[j - 1];
+    if (st.L) st.L.forEach((l, k) => { h += '<div class="' + (k ? 'blk' : 'cur') + '" style="--hlc:' + col + ';top:' + (pad + (l - 1) * lh) + 'px"></div>'; });
+  }
+  hl.innerHTML = h;
+  hl.style.transform = 'translateY(' + (-code.scrollTop) + 'px)';
+  gutter.querySelectorAll('.td').forEach(x => x.remove());
+  if (DBG && DBG.S) for (const t of Object.values(DBG.S.tasks)) {
+    if (!t.line || t.name === 'IDLE') continue;
+    const g = gutter.querySelector('[data-l="' + t.line + '"]');
+    if (g) g.insertAdjacentHTML('beforeend', '<span class="td" title="' + esc(t.name) + ' đang ở dòng này" style="background:' + (DBG.colors[t.name] || '#888') + '"></span>');
+  }
+}
+function dbgGo(i) {
+  if (!DBG) return;
+  DBG.i = Math.max(0, Math.min(i, DBG.steps.length - 1));
+  const st = DBG.steps[DBG.i], S = dbgState(DBG.i);
+  DBG.S = S;
+  $('dbgSlider').value = DBG.i;
+  $('dPos').textContent = 'bước ' + (DBG.i + 1) + '/' + DBG.steps.length + ' · t = ' + st.t.toFixed(3) + ' ms · tick ' + st.tk;
+  const col = DBG.colors[st.c] || (st.c && st.c.startsWith('ISR') ? 'var(--isr)' : '#59606b');
+  const why = st.k === 'sched' ? schedWhy(st)
+    : st.k === 'isr' && /^thoát/.test(st.x) ? 'ISR kết thúc. Nếu ISR đã gọi portYIELD_FROM_ISR(pdTRUE), CPU chuyển sang task ưu tiên cao nhất vừa được đánh thức thay vì quay lại task bị ngắt.'
+    : st.k === 'isr' && /portYIELD/.test(st.x) ? 'xHigherPriorityTaskWoken = pdTRUE: một task ưu tiên cao hơn task bị ngắt vừa Ready, nên yêu cầu chuyển ngữ cảnh ngay khi thoát ISR.'
+    : KIND_WHY[st.k] || '';
+  $('dOp').innerHTML = '<span class="who" style="background:' + col + '">' + esc(st.c || 'kernel') + '</span><span class="kind">' + esc(KIND_NAME[st.k] || st.k) + '</span>' +
+    '<div class="what">' + esc(st.x) + '</div><div class="why">' + esc(why) + '</div>';
+  /* tasks */
+  const tasks = Object.entries(S.tasks).sort((a, b) => b[1].prio - a[1].prio);
+  $('dTasks').innerHTML = '<table><tr><th>Task</th><th class="num">p</th><th>Trạng thái</th><th>Dòng</th></tr>' + tasks.map(([n, t]) =>
+    '<tr><td style="color:' + (DBG.colors[t.name] || 'inherit') + ';font-weight:600">' + esc(t.name) + '</td><td class="num">' + t.prio + '</td><td><span class="pill st-' + t.state.split(' ')[0] + '">' + esc(t.state) + '</span>' +
+    (t.state === 'Blocked' && t.why ? ' <span style="font-size:12px;color:var(--muted)">' + esc(t.why) + '</span>' : '') + '</td><td>' +
+    (t.line ? '<a href="#" data-goto="' + t.line + '">' + t.line + '</a>' : '') + '</td></tr>').join('') + '</table>';
+  /* objects + hardware */
+  const objs = Object.values(S.objs);
+  $('dObjs').innerHTML = objs.length ? '<table>' + objs.map(o => {
+    const val = o.type === 'mutex' || o.type === 'recursive' ? (o.holder ? 'giữ bởi <b>' + esc(o.holder) + '</b>' : 'tự do')
+      : o.type === 'timer' || o.type === 'eventgroup' ? '' : '<div style="display:flex;gap:8px;align-items:center"><div class="lvl" style="flex:1"><div style="width:' + Math.min(100, 100 * o.level / Math.max(o.len, 1)) + '%"></div></div>' + o.level + '/' + o.len + '</div>';
+    return '<tr><td>' + esc(o.name) + '</td><td style="color:var(--muted);font-size:12px">' + esc(o.type) + '</td><td style="width:45%">' + val + '</td></tr>';
+  }).join('') + '</table>' : '<div style="color:var(--muted);font-size:12px">chưa có</div>';
+  const pins = Object.entries(S.gpio);
+  $('dHw').innerHTML = (S.isr >= 0 ? '<div class="hint bad" style="margin-top:8px">Đang trong ISR (IRQ ' + S.isr + ')</div>' : '') +
+    (pins.length ? '<h3>GPIO</h3>' + pins.map(([p, v]) => '<span class="pill" style="margin-right:6px;color:' + (v ? 'var(--ok)' : 'var(--muted)') + '">' + esc(DBG.pins[p] || 'P' + p) + ' = ' + v + '</span>').join('') : '') +
+    (S.heap !== null ? '<p style="font-size:12px;color:var(--muted)">Heap còn trống: ' + S.heap + ' B</p>' : '');
+  /* log around the current step */
+  let lg = '';
+  for (let j = Math.max(0, DBG.i - 12); j < Math.min(DBG.steps.length, DBG.i + 8); j++) {
+    const s2 = DBG.steps[j];
+    lg += '<div data-i="' + j + '"' + (j === DBG.i ? ' class="now"' : '') + '><span class="lt">' + s2.t.toFixed(3) + '</span><span class="lw" style="color:' + (DBG.colors[s2.c] || 'var(--muted)') + '">' + esc(s2.c || '') + '</span><span>' + esc(s2.x) + '</span></div>';
+  }
+  $('dLog').innerHTML = lg;
+  const now = $('dLog').querySelector('.now');
+  if (now) now.scrollIntoView({ block: 'nearest' });
+  /* output: stdout is UTF-8 bytes on the server side; slice by bytes */
+  const bytes = new TextEncoder().encode(DBG.stdout);
+  const outTxt = new TextDecoder().decode(bytes.slice(0, S.out));
+  $('dOut').textContent = outTxt.split('\n').slice(-40).join('\n');
+  $('dOut').scrollTop = 1e9;
+  /* editor */
+  dbgPaint();
+  if (st.L) {
+    const lh = 19.5, y = 8 + (st.L[0] - 1) * lh;
+    if (y < code.scrollTop || y > code.scrollTop + code.clientHeight - 40) code.scrollTop = Math.max(0, y - code.clientHeight / 3);
+  }
+  if (activeTab() === 'tl') drawTimeline();
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-goto]');
+  if (a) { e.preventDefault(); gotoLine(+a.dataset.goto); }
+});
+window.addEventListener('keydown', e => {
+  if (!DBG || activeTab() !== 'dbg' || e.target === code || /INPUT|SELECT/.test(e.target.tagName)) return;
+  if (e.key === 'ArrowRight') { e.preventDefault(); $('dNext').click(); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); $('dBack').click(); }
+});
+
+/* ---------- init ---------- */
+(async function init() {
+  let defaults = {};
+  try { defaults = await (await fetch('/api/defaults')).json(); } catch (e) {}
+  MCUS = defaults.mcus || {};
+  DEFAULTS = defaults;
+  $('mcu').innerHTML = Object.entries(MCUS).map(([k, m]) => '<option value="' + esc(k) + '" title="' + esc(m.name) + '">' + esc(k === 'host' ? 'Không giới hạn' : k.toUpperCase()) + '</option>').join('');
+  setOpts(defaults);
+  try { const s = store.get('opts.v2'); if (s) setOpts(JSON.parse(s)); } catch (e) {}
+  const m = store.get('mode');
+  if (m && MODE_NAME[m]) $('mode').value = m;
+  const saved = store.get('code');
+  if (saved) setFile(store.get('fname') || 'main.c', saved);
+  let list = [];
+  try {
+    list = await (await fetch('/api/examples')).json();
+    const CH = { 3: 'Quản lý heap', 4: 'Quản lý task', 5: 'Queue', 6: 'Software timer', 7: 'Quản lý ngắt', 8: 'Quản lý tài nguyên', 9: 'Event group', 10: 'Task notification', 12: 'Hỗ trợ phát triển (run-time stats)' };
+    const groups = [];
+    for (const x of list.filter(x => x.mode === 'book')) {          /* the book's examples, one group per chapter */
+      const ch = +((x.path.match(/(?:ex|lst)(\d+)_/) || [])[1] || 0), label = 'Sách · Chương ' + ch + ': ' + (CH[ch] || '');
+      let g = groups.find(g => g.label === label);
+      if (!g) groups.push(g = { label, ch, items: [] });
+      g.items.push(x);
+    }
+    groups.sort((a, b) => a.ch - b.ch);
+    const OTHER = { freertos: 'FreeRTOS: ví dụ thêm (ISR, ngoại vi, MCU)', c: 'Chương trình C (bare-metal)' };
+    for (const m of [...new Set(list.map(x => x.mode))].filter(m => m !== 'book'))
+      groups.push({ label: OTHER[m] || m, items: list.filter(x => x.mode === m) });
+    for (const g of groups)
+      $('examples').insertAdjacentHTML('beforeend', '<optgroup label="' + esc(g.label) + '">' +
+        g.items.map(x => '<option value="' + esc(x.path) + '" title="' + esc(x.path) + '">' + esc(x.title || x.path.split('/').pop()) + '</option>').join('') + '</optgroup>');
+    if (!saved && list.length) await loadExample((list.find(x => x.path === 'book/ex4_1.c') || list[0]).path);
+  } catch (e) {}
+  updateGutter();
+  updateMode();
+  const q = new URLSearchParams(location.search);
+  if (q.get('example')) await loadExample(q.get('example'));
+  if (q.get('run') === '1') {
+    await doRun(q.get('debug') === '1');
+    if (q.get('step') && DBG) dbgGo(+q.get('step'));
+    if (q.get('tab')) showTab(q.get('tab'));
+    if (q.get('all') === '1' && curTrace()) { tlStart = 0; tlLen = curTrace().total; drawTimeline(); }
+  }
+})();
+</script>
+</body>
+</html>

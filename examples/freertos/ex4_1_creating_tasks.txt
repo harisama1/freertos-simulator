@@ -1,0 +1,41 @@
+/* Example 4.1 Creating tasks (Mastering the FreeRTOS Real Time Kernel).
+ * Copied as in the book: no #include lines, mainDELAY_LOOP_COUNT not defined.
+ * Try: Time slicing ON vs OFF. */
+
+void vTask1( void * pvParameters )
+{
+    volatile unsigned long ulCount;
+
+    for( ;; )
+    {
+        vPrintLine( "Task 1 is running" );
+
+        for( ulCount = 0; ulCount < mainDELAY_LOOP_COUNT; ulCount++ )
+        {
+        }
+    }
+}
+
+void vTask2( void * pvParameters )
+{
+    volatile unsigned long ulCount;
+
+    for( ;; )
+    {
+        vPrintLine( "Task 2 is running" );
+
+        for( ulCount = 0; ulCount < mainDELAY_LOOP_COUNT; ulCount++ )
+        {
+        }
+    }
+}
+
+int main( void )
+{
+    xTaskCreate( vTask1, "Task 1", 1000, NULL, 1, NULL );
+    xTaskCreate( vTask2, "Task 2", 1000, NULL, 1, NULL );
+
+    vTaskStartScheduler();
+
+    for( ;; );
+}
